@@ -250,39 +250,23 @@ class Plan(Item):
         return ItemSet([Run.get(id=run['id'])
                         for entry in self.entries for run in entry['runs']])
 
-    def add_run(self, run, configuration=None):
+    def add_run(self, run):
         url = 'add_plan_entry/{}'.format(self.id)
-
         run_data = {
             k: v
             for k, v in run.data.items()
             if k in ('case_ids', 'config_ids', 'name', 'description')
         }
-        prepared_runs = [run_data]
-        configs = []
-        if configuration:
-            # Add test run for each inner configuration except already created
-            for c in configuration['configs']:
-                if c['id'] not in run.data['config_ids']:
-                    prepared_runs.append(
-                        {'case_ids': [],
-                         'config_ids': [c['id']],
-                         'name': run.name,
-                         'description': run.description})
-                    configs.append(c['id'])
-        # The order matters
-        configs.extend(run_data['config_ids'])
-        entry = {
+        request = {
             "suite_id": run.suite_id,
             "name": run.name,
             "description": run.description,
-            "config_ids": configs,
+            "config_ids": run.config_ids,
             "include_all": run.include_all,
             "case_ids": run.data['case_ids'],
-            "runs": prepared_runs,
+            "runs": [run_data],
         }
-
-        result = self._handler('POST', url, json=entry)
+        result = self._handler('POST', url, json=request)
         new_run_data = result['runs'][0]
         run.id = new_run_data.pop('id')
         run.data.update(new_run_data)

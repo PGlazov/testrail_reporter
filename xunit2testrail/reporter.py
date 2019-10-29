@@ -47,8 +47,7 @@ class Reporter(object):
                         tests_suite, plan_name, send_skipped=False,
                         use_test_run_if_exists=False, send_duplicates=False,
                         testrail_add_missing_cases=False, testrail_case_custom_fields=None,
-                        testrail_case_section_name=None, testrail_configuration_name=None,
-                        dry_run=False, request_timeout=600):
+                        testrail_case_section_name=None, dry_run=False, request_timeout=600):
         self._config['testrail'] = dict(base_url=base_url,
                                         username=username,
                                         password=password,
@@ -65,7 +64,6 @@ class Reporter(object):
         self.testrail_add_missing_cases = testrail_add_missing_cases
         self.testrail_case_custom_fields = testrail_case_custom_fields or {}
         self.testrail_case_section_name = testrail_case_section_name
-        self.testrail_configuration_name = testrail_configuration_name
         self.dry_run = dry_run
 
     @property
@@ -119,9 +117,6 @@ class Reporter(object):
         with open(self.xunit_report) as f:
             ts, tr = xunitparser.parse(f)
             return ts, tr
-
-    def get_config(self, name):
-        return self.project.configs.find(name=name)
 
     def get_jenkins_report_url(self, xunit_case):
         module, _, classname = xunit_case.classname.rpartition('.')
@@ -241,10 +236,7 @@ class Reporter(object):
                 filtered_cases.append(testrail_case)
         return filtered_cases
 
-    def create_test_run(self, name, plan, cases,
-                        config_ids=None, selected_config=None):
-        if config_ids is None:
-            config_ids = []
+    def create_test_run(self, name, plan, cases):
         description = ('Run **{name}** on #{plan_name}. \n'
                        '[Test results]({self.test_results_link})').format(
                            name=name,
@@ -254,55 +246,24 @@ class Reporter(object):
                   description=description,
                   suite_id=self.suite.id,
                   milestone_id=self.milestone.id,
-                  config_ids=config_ids,
+                  config_ids=[],
                   case_ids=[x.id for x in cases], )
-        if selected_config:
-            plan.add_run(run, selected_config.data)
-        else:
-            plan.add_run(run)
+        plan.add_run(run)
         return run
 
     def get_or_create_test_run(self, plan, cases):
         # run name can't have whitespaces in the beginning or in the end
         # because they are silently trimmed by server side (API or database)
-        run_name_with_env = ("{0.env_description} "
-                             "<{0.tests_suite_name}>").format(self).strip()
-        config_ids = []
-        selected_config = None
-        create_new_entry = False
-        if self.testrail_configuration_name:
-            # Tests will be grouped by test suite for different environments
-            # described in the testrail_configuration_name parameter
-            selected_config = self.get_config(self.testrail_configuration_name)
-            if selected_config:
-                config_ids = [config_group['id']
-                              for config_group in selected_config.configs
-                              if config_group['name'] == self.env_description]
-                if config_ids:
-                    create_new_entry = True
-        run_name = self.tests_suite_name if create_new_entry else run_name_with_env
+        run_name = ("{0.env_description} "
+                    "<{0.tests_suite_name}>").format(self).strip()
         if self.use_test_run_if_exists:
             try:
-                # If already created with predefined configuration
-                # it will be found here
-                run = plan.runs.find(name=run_name,
-                                     suite_id=self.suite.id,
-                                     config_ids=config_ids)
+                run = plan.runs.find(name=run_name, suite_id=self.suite.id)
                 logger.debug('Found test run "{}"'.format(run_name))
                 return run
             except NotFound:
                 logger.debug('Test run "{}" not found'.format(run_name))
-                # Search for entry name to avoid duplication.
-                # If new inner config was added to the configuration after entry already created for that conf
-                # New entry won't be created
-                # ToDO: Add additional check: one suite may be tested with different configuration groups
-                already_created = [e['id'] for e in plan.entries if e['name'] == self.tests_suite_name]
-                if len(already_created):
-                    run_name = run_name_with_env
-                    create_new_entry = False
-            return self.create_test_run(run_name, plan,
-                                        cases, config_ids,
-                                        selected_config if create_new_entry else None)
+        return self.create_test_run(run_name, plan, cases)
 
     def print_run_url(self, test_run):
         print('[TestRun URL] {}'.format(test_run.url))
